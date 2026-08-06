@@ -1,31 +1,109 @@
-import streamlit as st
-import pandas as pd
+"""
+Candidate Solution Set (CSS) Comparison Module.
+
+Provides visual trade-off analysis, structural decision-variable inspection, 
+parallel coordinate mapping, baseline difference metrics, and X -> Y 
+correlation heatmaps for candidate solution subsets.
+"""
+
+from typing import Any, Dict, List, Optional
+
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import streamlit as st
+
 
 # =====================================================
-# BASIC HELPERS
+# HELPER FUNCTIONS
 # =====================================================
 
-def get_numeric_dimensions(df, dataset):
-    dimensions = dataset.get("metrics", []) + dataset.get("selected_indicators", [])
-    
+
+def get_numeric_dimensions(
+    df: pd.DataFrame, dataset: Dict[str, Any]
+) -> List[str]:
+    """
+    Extracts numeric objective and indicator column names present in the DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Active solution space DataFrame.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+
+    Returns
+    -------
+    List[str]
+        List of verified numeric metric and indicator column names.
+    """
+    if df is None or df.empty or not dataset:
+        return []
+
+    metrics = dataset.get("metrics", []) or []
+    indicators = dataset.get("selected_indicators", []) or []
+    dimensions = list(metrics) + list(indicators)
+
     return [
-        col for col in dimensions
+        col
+        for col in dimensions
         if col in df.columns and pd.api.types.is_numeric_dtype(df[col])
     ]
 
-def get_decision_variable_columns(df, dataset):
-    var_prefix = dataset["config"].get("var_prefix", "x_")
-    
-    # REFACTOR 1: Asegurar que las variables de decisión sean numéricas
+
+def get_decision_variable_columns(
+    df: pd.DataFrame, dataset: Dict[str, Any]
+) -> List[str]:
+    """
+    Retrieves decision variable column names matching the configured variable prefix.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Active solution space DataFrame.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+
+    Returns
+    -------
+    List[str]
+        List of numeric decision variable column names.
+    """
+    if df is None or df.empty or not dataset:
+        return []
+
+    config = dataset.get("config", {}) if dataset else {}
+    var_prefix = config.get("var_prefix", "x_")
+
     return [
-        col for col in df.columns
-        if col.startswith(var_prefix) and pd.api.types.is_numeric_dtype(df[col])
+        col
+        for col in df.columns
+        if var_prefix
+        and col.startswith(var_prefix)
+        and pd.api.types.is_numeric_dtype(df[col])
     ]
 
-def normalize_metric(series, goal):
+
+def normalize_metric(series: pd.Series, goal: str) -> pd.Series:
+    """
+    Normalizes a numeric Pandas Series to the range [0.0, 1.0] based on optimization goal.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Numeric metric values to normalize.
+    goal : str
+        Optimization goal ("Maximize" or "Minimize").
+
+    Returns
+    -------
+    pd.Series
+        Normalized metric values scaled from 0.0 to 1.0.
+    """
+    if series.empty:
+        return series
+
     min_v = series.min()
     max_v = series.max()
 
@@ -39,22 +117,40 @@ def normalize_metric(series, goal):
 
     return normalized
 
+
 # =====================================================
-# TRADE-OFF RADAR
+# TRADE-OFF RADAR CHART
 # =====================================================
 
-def render_tradeoff_radar(compare_df, css_df, dataset):
+
+def render_tradeoff_radar(
+    compare_df: pd.DataFrame, css_df: pd.DataFrame, dataset: Dict[str, Any]
+) -> None:
+    """
+    Renders a polar radar chart comparing normalized solution profiles across objectives.
+
+    Parameters
+    ----------
+    compare_df : pd.DataFrame
+        DataFrame containing selected solutions to compare.
+    css_df : pd.DataFrame
+        Full Candidate Solution Set DataFrame used for dimension discovery.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+    """
     numeric_dimensions = get_numeric_dimensions(css_df, dataset)
 
     if len(numeric_dimensions) < 3:
-        st.info("At least three numeric objectives or indicators are required to create a radar chart.")
+        st.info(
+            "At least three numeric objectives or indicators are required to create a radar chart."
+        )
         return
 
     selected_metrics = st.multiselect(
         "Objectives and indicators for radar profile",
         numeric_dimensions,
-        default=numeric_dimensions[:min(5, len(numeric_dimensions))],
-        key="css_tradeoff_metrics"
+        default=numeric_dimensions[: min(5, len(numeric_dimensions))],
+        key="css_tradeoff_metrics",
     )
 
     if len(selected_metrics) < 3:
@@ -69,13 +165,15 @@ def render_tradeoff_radar(compare_df, css_df, dataset):
             metric_goals[metric] = st.selectbox(
                 metric,
                 ["Maximize", "Minimize"],
-                key=f"css_goal_{metric}"
+                key=f"css_goal_{metric}",
             )
 
     radar_df = compare_df.copy()
 
     for metric in selected_metrics:
-        radar_df[metric] = normalize_metric(radar_df[metric], metric_goals[metric])
+        radar_df[metric] = normalize_metric(
+            radar_df[metric], metric_goals[metric]
+        )
 
     fig = go.Figure()
 
@@ -89,7 +187,7 @@ def render_tradeoff_radar(compare_df, css_df, dataset):
                 r=values,
                 theta=theta,
                 mode="lines+markers",
-                name=f"ID {int(row['id'])}"
+                name=f"ID {int(row['id'])}",
             )
         )
 
@@ -98,62 +196,95 @@ def render_tradeoff_radar(compare_df, css_df, dataset):
         showlegend=True,
         template="plotly_white",
         height=450,
-        margin=dict(t=40, b=40)
+        margin=dict(t=40, b=40),
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
 
 # =====================================================
 # PARALLEL COORDINATES
 # =====================================================
 
-def render_parallel_coordinates(compare_df, dataset):
+
+def render_parallel_coordinates(
+    compare_df: pd.DataFrame, dataset: Dict[str, Any]
+) -> None:
+    """
+    Renders a Parallel Coordinates plot mapping multi-dimensional solution tradeoffs.
+
+    Parameters
+    ----------
+    compare_df : pd.DataFrame
+        DataFrame containing selected solutions to compare.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+    """
     numeric_dims = get_numeric_dimensions(compare_df, dataset)
-    
+
     if len(numeric_dims) < 2:
-        st.info("At least two numerical metrics are required for Parallel Coordinates.")
+        st.info(
+            "At least two numerical metrics are required for Parallel Coordinates."
+        )
         return
 
     selected_dims = st.multiselect(
         "Metrics for Parallel Coordinates",
         numeric_dims,
-        default=numeric_dims[:min(6, len(numeric_dims))],
-        key="css_parcoords_dims"
+        default=numeric_dims[: min(6, len(numeric_dims))],
+        key="css_parcoords_dims",
     )
 
     if not selected_dims:
         return
 
-    dimensions_config = []
-    for col in selected_dims:
-        dimensions_config.append(
-            dict(
-                range=[compare_df[col].min(), compare_df[col].max()],
-                label=col,
-                values=compare_df[col]
-            )
+    dimensions_config = [
+        dict(
+            range=[compare_df[col].min(), compare_df[col].max()],
+            label=col,
+            values=compare_df[col],
         )
+        for col in selected_dims
+    ]
 
-    fig = go.Figure(data=go.Parcoords(
-        line=dict(
-            color=compare_df["id"],
-            colorscale='Viridis',
-            showscale=True,
-            colorbar=dict(title="Solution ID")
-        ),
-        dimensions=dimensions_config
-    ))
+    fig = go.Figure(
+        data=go.Parcoords(
+            line=dict(
+                color=compare_df["id"],
+                colorscale="Viridis",
+                showscale=True,
+                colorbar=dict(title="Solution ID"),
+            ),
+            dimensions=dimensions_config,
+        )
+    )
 
-    fig.update_layout(template="plotly_white", height=400, margin=dict(t=40, b=40))
+    fig.update_layout(
+        template="plotly_white", height=400, margin=dict(t=40, b=40)
+    )
     st.plotly_chart(fig, use_container_width=True)
+
 
 # =====================================================
 # BASELINE DIFFERENCE / GAP ANALYSIS
 # =====================================================
 
-def render_baseline_difference_chart(compare_df, dataset):
+
+def render_baseline_difference_chart(
+    compare_df: pd.DataFrame, dataset: Dict[str, Any]
+) -> None:
+    """
+    Renders a relative percentage difference bar chart relative to a selected baseline solution.
+
+    Parameters
+    ----------
+    compare_df : pd.DataFrame
+        DataFrame containing selected solutions to compare.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+    """
     numeric_dims = get_numeric_dimensions(compare_df, dataset)
-    if not numeric_dims:
+    if not numeric_dims or "id" not in compare_df.columns:
         return
 
     col_base, col_metrics = st.columns([1, 2])
@@ -163,15 +294,15 @@ def render_baseline_difference_chart(compare_df, dataset):
             "Select Baseline Solution",
             options=compare_df["id"].tolist(),
             format_func=lambda x: f"ID {int(x)}",
-            key="css_baseline_id"
+            key="css_baseline_id",
         )
 
     with col_metrics:
         selected_metrics = st.multiselect(
             "Metrics to compare vs Baseline",
             numeric_dims,
-            default=numeric_dims[:min(4, len(numeric_dims))],
-            key="css_baseline_metrics"
+            default=numeric_dims[: min(4, len(numeric_dims))],
+            key="css_baseline_metrics",
         )
 
     if not selected_metrics or baseline_id is None:
@@ -181,7 +312,9 @@ def render_baseline_difference_chart(compare_df, dataset):
     other_df = compare_df[compare_df["id"] != baseline_id].copy()
 
     if other_df.empty:
-        st.info("Select at least one additional solution to compare against the Baseline.")
+        st.info(
+            "Select at least one additional solution to compare against the Baseline."
+        )
         return
 
     diff_data = []
@@ -189,19 +322,20 @@ def render_baseline_difference_chart(compare_df, dataset):
         for metric in selected_metrics:
             base_val = baseline_row[metric]
             curr_val = row[metric]
-            
-            # REFACTOR 3: Prevención de división por cero
+
             if base_val != 0:
                 pct_change = ((curr_val - base_val) / abs(base_val)) * 100
             else:
-                pct_change = 0.0 # O manejar según tu preferencia si base es 0
-                
-            diff_data.append({
-                "Solution": f"ID {int(row['id'])}",
-                "Metric": metric,
-                "Relative Change (%)": pct_change,
-                "Absolute Difference": curr_val - base_val
-            })
+                pct_change = 0.0 if curr_val == 0 else np.nan
+
+            diff_data.append(
+                {
+                    "Solution": f"ID {int(row['id'])}",
+                    "Metric": metric,
+                    "Relative Change (%)": pct_change,
+                    "Absolute Difference": curr_val - base_val,
+                }
+            )
 
     diff_df = pd.DataFrame(diff_data)
 
@@ -211,29 +345,42 @@ def render_baseline_difference_chart(compare_df, dataset):
         y="Relative Change (%)",
         color="Solution",
         barmode="group",
-        hover_data=["Absolute Difference"]
+        hover_data=["Absolute Difference"],
     )
 
     fig.add_hline(y=0, line_dash="dash", line_color="black")
     fig.update_layout(template="plotly_white", height=400)
     st.plotly_chart(fig, use_container_width=True)
 
+
 # =====================================================
 # SOLUTION SIMILARITY MATRIX
 # =====================================================
 
-def render_solution_similarity_matrix(compare_df, dataset):
+
+def render_solution_similarity_matrix(
+    compare_df: pd.DataFrame, dataset: Dict[str, Any]
+) -> None:
+    """
+    Computes and displays pairwise decision-variable similarity correlation between solutions.
+
+    Parameters
+    ----------
+    compare_df : pd.DataFrame
+        DataFrame containing selected solutions to compare.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+    """
     var_cols = get_decision_variable_columns(compare_df, dataset)
     if not var_cols or len(compare_df) < 2:
-        st.info("Requires decision variables and at least 2 solutions to compute similarity.")
+        st.info(
+            "Requires decision variables and at least 2 solutions to compute similarity."
+        )
         return
 
-    # REFACTOR 2: Usar correlación genérica en lugar de Jaccard binario
     matrix_df = compare_df.set_index("id")[var_cols]
-    
-    # Transponemos para correlacionar filas (soluciones) en vez de columnas
-    sim_matrix = matrix_df.T.corr().fillna(1.0) 
-    
+    sim_matrix = matrix_df.T.corr().fillna(0.0)
+
     sim_matrix.index = [f"ID {int(i)}" for i in sim_matrix.index]
     sim_matrix.columns = [f"ID {int(c)}" for c in sim_matrix.columns]
 
@@ -241,7 +388,8 @@ def render_solution_similarity_matrix(compare_df, dataset):
         sim_matrix,
         text_auto=".2f",
         color_continuous_scale="RdBu",
-        zmin=-1, zmax=1,
+        zmin=-1.0,
+        zmax=1.0,
         labels=dict(color="Correlation"),
     )
 
@@ -253,12 +401,28 @@ def render_solution_similarity_matrix(compare_df, dataset):
 # DECISION-VARIABLE MATRIX
 # =====================================================
 
-def render_decision_variable_matrix(compare_df, dataset):
+
+def render_decision_variable_matrix(
+    compare_df: pd.DataFrame, dataset: Dict[str, Any]
+) -> None:
+    """
+    Renders a structural heatmap matrix of decision variable values per candidate solution.
+
+    Parameters
+    ----------
+    compare_df : pd.DataFrame
+        DataFrame containing selected solutions to compare.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+    """
     variable_cols = get_decision_variable_columns(compare_df, dataset)
-    var_prefix = dataset["config"].get("var_prefix", "x_")
+    config = dataset.get("config", {}) if dataset else {}
+    var_prefix = config.get("var_prefix", "x_")
 
     if not variable_cols:
-        st.info(f"No numeric decision-variable columns with prefix '{var_prefix}' found.")
+        st.info(
+            f"No numeric decision-variable columns with prefix '{var_prefix}' found."
+        )
         return
 
     matrix_df = compare_df.set_index("id")[variable_cols].copy()
@@ -267,7 +431,7 @@ def render_decision_variable_matrix(compare_df, dataset):
     fig = px.imshow(
         matrix_df,
         labels=dict(x="Decision variables", y="Solutions", color="Value"),
-        color_continuous_scale=[[0, "#e0e0e0"], [1, "#00e676"]]
+        color_continuous_scale=[[0, "#e0e0e0"], [1, "#00e676"]],
     )
 
     fig.update_layout(
@@ -275,31 +439,51 @@ def render_decision_variable_matrix(compare_df, dataset):
         coloraxis_showscale=False,
         xaxis=dict(tickangle=-45, showgrid=False),
         yaxis=dict(autorange="reversed", showgrid=False),
-        height=520
+        height=520,
     )
 
     fig.update_traces(
-        xgap=3, ygap=3,
-        hovertemplate="<b>%{y}</b><br>Variable: %{x}<br>Value: %{z}<extra></extra>"
+        xgap=3,
+        ygap=3,
+        hovertemplate="<b>%{y}</b><br>Variable: %{x}<br>Value: %{z}<extra></extra>",
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
 
 # =====================================================
 # DECISION-VARIABLE DISTRIBUTION
 # =====================================================
 
-def render_decision_variable_distribution(css_df, dataset):
+
+def render_decision_variable_distribution(
+    css_df: pd.DataFrame, dataset: Dict[str, Any]
+) -> None:
+    """
+    Renders a bar chart summarizing average activation/selection rates across decision variables.
+
+    Parameters
+    ----------
+    css_df : pd.DataFrame
+        Full Candidate Solution Set DataFrame.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+    """
     variable_cols = get_decision_variable_columns(css_df, dataset)
-    var_prefix = dataset["config"].get("var_prefix", "x_")
+    config = dataset.get("config", {}) if dataset else {}
+    var_prefix = config.get("var_prefix", "x_")
 
     if not variable_cols:
-        st.info(f"No numeric decision-variable columns with prefix '{var_prefix}' found.")
+        st.info(
+            f"No numeric decision-variable columns with prefix '{var_prefix}' found."
+        )
         return
 
     variable_summary = css_df[variable_cols].mean().reset_index()
     variable_summary.columns = ["decision_variable", "selection_rate"]
-    variable_summary = variable_summary.sort_values("selection_rate", ascending=False)
+    variable_summary = variable_summary.sort_values(
+        "selection_rate", ascending=False
+    )
 
     max_variables = min(50, len(variable_summary))
     if max_variables < 1:
@@ -311,7 +495,7 @@ def render_decision_variable_distribution(css_df, dataset):
         min_value=1,
         max_value=max_variables,
         value=min(20, max_variables),
-        key="css_decision_variable_top_n"
+        key="css_decision_variable_top_n",
     )
 
     plot_df = variable_summary.head(top_n)
@@ -320,66 +504,100 @@ def render_decision_variable_distribution(css_df, dataset):
         plot_df,
         x="decision_variable",
         y="selection_rate",
-        labels={"decision_variable": "Decision variable", "selection_rate": "Mean Value / Selection rate"}
+        labels={
+            "decision_variable": "Decision variable",
+            "selection_rate": "Mean Value / Selection rate",
+        },
     )
 
     fig.update_layout(template="plotly_white", height=420, xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
 
+
 # =====================================================
 # VARIABLE TO METRIC MAPPING (X vs Y Correlation)
 # =====================================================
 
-def render_variable_metric_correlation(compare_df, dataset):
+
+def render_variable_metric_correlation(
+    compare_df: pd.DataFrame, dataset: Dict[str, Any]
+) -> None:
+    """
+    Renders an X -> Y correlation matrix heatmap (Decision Variables vs. Metrics).
+
+    Parameters
+    ----------
+    compare_df : pd.DataFrame
+        DataFrame containing selected solutions to compare.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+    """
     var_cols = get_decision_variable_columns(compare_df, dataset)
     metric_cols = get_numeric_dimensions(compare_df, dataset)
 
     if not var_cols or not metric_cols:
-        st.info("Both decision variables and numeric metrics are required to compute mapping.")
+        st.info(
+            "Both decision variables and numeric metrics are required to compute mapping."
+        )
         return
 
     if len(compare_df) < 2:
         st.info("Select at least 2 solutions to calculate correlation.")
         return
 
-    # Creamos la sub-matriz X (variables) e Y (métricas)
     combined_df = compare_df[var_cols + metric_cols]
-    
-    # Matriz de correlación
     corr_matrix = combined_df.corr()
-    
-    # Extraemos solo las filas X vs columnas Y
-    xy_corr = corr_matrix.loc[var_cols, metric_cols].dropna(how="all").fillna(0.0)
+
+    xy_corr = (
+        corr_matrix.loc[var_cols, metric_cols].dropna(how="all").fillna(0.0)
+    )
 
     if xy_corr.empty:
-        st.info("Could not calculate variance/correlation for the selected subset.")
+        st.info(
+            "Could not calculate variance/correlation for the selected subset."
+        )
         return
 
     fig = px.imshow(
         xy_corr,
-        labels=dict(x="Metrics / Objectives (Y)", y="Decision Variables (X)", color="Correlation"),
+        labels=dict(
+            x="Metrics / Objectives (Y)",
+            y="Decision Variables (X)",
+            color="Correlation",
+        ),
         color_continuous_scale="RdBu",
         zmin=-1.0,
         zmax=1.0,
-        aspect="auto"
+        aspect="auto",
     )
 
     fig.update_layout(
         template="plotly_white",
         height=max(400, len(var_cols) * 20),
-        xaxis=dict(tickangle=-45)
+        xaxis=dict(tickangle=-45),
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
 
-
-
 # =====================================================
-# MAIN CSS COMPARISON
+# MAIN CSS COMPARISON PIPELINE
 # =====================================================
 
-def render_css_comparison(css_df, dataset):
+
+def render_css_comparison(
+    css_df: pd.DataFrame, dataset: Dict[str, Any]
+) -> None:
+    """
+    Main entry point for rendering the detailed Candidate Solution Set (CSS) comparison panel.
+
+    Parameters
+    ----------
+    css_df : pd.DataFrame
+        Active Candidate Solution Set DataFrame.
+    dataset : Dict[str, Any]
+        Global dataset context dictionary.
+    """
     if not st.session_state.get("show_css_comparison", False):
         return
 
@@ -400,7 +618,7 @@ def render_css_comparison(css_df, dataset):
             "Pick solutions to compare & highlight",
             css_ids,
             default=default_ids,
-            key="css_compare_ids"
+            key="css_compare_ids",
         )
 
         st.session_state.css_highlight_ids = compare_ids
@@ -409,15 +627,16 @@ def render_css_comparison(css_df, dataset):
             st.info("Select at least 2 solutions to compare.")
             return
 
-
         compare_df = css_df[css_df["id"].isin(compare_ids)].copy()
 
-        tab_metrics, tab_vars, tab_sim, tab_mapping = st.tabs([
-            "📊 Metrics & Trade-offs", 
-            "📋 Decision Variables",
-            "🔀 Structural Similarity",
-            "🔗 X → Y Mapping"  
-        ])
+        tab_metrics, tab_vars, tab_sim, tab_mapping = st.tabs(
+            [
+                "📊 Metrics & Trade-offs",
+                "📋 Decision Variables",
+                "🔀 Structural Similarity",
+                "🔗 X → Y Mapping",
+            ]
+        )
 
         with tab_metrics:
             render_tradeoff_radar(compare_df, css_df, dataset)
@@ -425,11 +644,14 @@ def render_css_comparison(css_df, dataset):
             render_parallel_coordinates(compare_df, dataset)
             st.divider()
             render_baseline_difference_chart(compare_df, dataset)
+
         with tab_vars:
             render_decision_variable_matrix(compare_df, dataset)
             st.divider()
             render_decision_variable_distribution(css_df, dataset)
+
         with tab_sim:
             render_solution_similarity_matrix(compare_df, dataset)
+
         with tab_mapping:
             render_variable_metric_correlation(compare_df, dataset)
