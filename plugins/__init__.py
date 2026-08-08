@@ -1,12 +1,13 @@
 """
 Plugins Package Initializer.
 
-Exports registered domain plugins and provides lookup and factory mechanisms
-for dynamic plugin instantiation across the framework.
+Exports domain plugin base classes, concrete implementations, and provides 
+lookup and factory mechanisms for dynamic plugin instantiation across the framework.
 """
 
 from typing import Any, Dict, List, Optional, Type
 
+from .base_plugin import DomainPlugin
 from .aerospace_plugin import AerospacePlugin
 from .nrp_plugin import NRPPlugin
 
@@ -14,12 +15,13 @@ from .nrp_plugin import NRPPlugin
 # PLUGIN REGISTRY
 # =====================================================
 
-PLUGIN_REGISTRY: Dict[str, Type[Any]] = {
+PLUGIN_REGISTRY: Dict[str, Type[DomainPlugin]] = {
     "nrp": NRPPlugin,
     "aerospace": AerospacePlugin,
 }
 
 __all__ = [
+    "DomainPlugin",
     "NRPPlugin",
     "AerospacePlugin",
     "PLUGIN_REGISTRY",
@@ -44,7 +46,7 @@ def list_plugins() -> List[str]:
     return list(PLUGIN_REGISTRY.keys())
 
 
-def get_plugin(plugin_name: str, **kwargs: Any) -> Optional[Any]:
+def get_plugin(plugin_name: str, **kwargs: Any) -> Optional[DomainPlugin]:
     """
     Instantiates and returns a domain plugin by identifier name.
 
@@ -57,7 +59,7 @@ def get_plugin(plugin_name: str, **kwargs: Any) -> Optional[Any]:
 
     Returns
     -------
-    Optional[Any]
+    Optional[DomainPlugin]
         An instance of the requested plugin class, or None if key is unrecognized.
     """
     plugin_cls = PLUGIN_REGISTRY.get(plugin_name)

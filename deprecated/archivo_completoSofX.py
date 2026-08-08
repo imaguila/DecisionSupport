@@ -5690,7 +5690,7 @@ from css.css_comparison import render_css_comparison
 from css.css_panel import render_css_panel
 from core.enrichment import render_enrichment
 from core.framing import apply_framing
-from core.input_panel import render_input_panel
+from deprecated.input_panel import render_input_panel
 from core.workspace import render_workspace
 from core.workspace_controls import render_workspace_controls
 from lenses.lens_engine import apply_lens

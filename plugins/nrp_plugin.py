@@ -5,15 +5,20 @@ Provides mathematical indicator calculations and requirement dependency
 mappings for software release planning optimization models.
 """
 
-from typing import Dict, List, Set, Union
+import logging
+from typing import Dict, Iterable, List, Set
 
 import numpy as np
 import pandas as pd
 
+from .base_plugin import DomainPlugin
+
+logger = logging.getLogger(__name__)
+
 EPS: float = 1e-9
 
 
-class NRPPlugin:
+class NRPPlugin(DomainPlugin):
     """
     Next Release Problem (NRP) domain plugin.
 
@@ -27,10 +32,10 @@ class NRPPlugin:
     """
 
     def __init__(self, var_prefix: str = "req_") -> None:
-        self.var_prefix = var_prefix
+        super().__init__(var_prefix=var_prefix)
 
     # --------------------------------------------------
-    # Indicator registry
+    # Indicator Registry
     # --------------------------------------------------
 
     def available_indicators(self) -> Set[str]:
@@ -58,7 +63,7 @@ class NRPPlugin:
         }
 
     # --------------------------------------------------
-    # Required columns
+    # Required Columns Mapping
     # --------------------------------------------------
 
     def requirements(self) -> Dict[str, List[str]]:
@@ -86,34 +91,11 @@ class NRPPlugin:
         }
 
     # --------------------------------------------------
-    # Decision variables
-    # --------------------------------------------------
-
-    def decision_variables(self, df: pd.DataFrame) -> List[str]:
-        """
-        Identifies decision variable columns in the input DataFrame.
-
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Input solution space DataFrame.
-
-        Returns
-        -------
-        List[str]
-            List of column names matching the decision variable prefix.
-        """
-        if df is None or df.empty:
-            return []
-
-        return [c for c in df.columns if c.startswith(self.var_prefix)]
-
-    # --------------------------------------------------
-    # Indicator computation
+    # Indicator Computation
     # --------------------------------------------------
 
     def compute_indicators(
-        self, df: pd.DataFrame, indicators: Union[Set[str], List[str]]
+        self, df: pd.DataFrame, indicators: Iterable[str]
     ) -> pd.DataFrame:
         """
         Computes specified software engineering indicators for the given DataFrame.
@@ -122,7 +104,7 @@ class NRPPlugin:
         ----------
         df : pd.DataFrame
             Input solution space DataFrame.
-        indicators : Union[Set[str], List[str]]
+        indicators : Iterable[str]
             Collection of indicator names to compute.
 
         Returns
@@ -211,7 +193,11 @@ class NRPPlugin:
                             result[req_cols].sum(axis=1) / len(req_cols)
                         )
 
-            except Exception as e:
-                print(f"[PLUGIN][NRP] Unable to compute '{indicator}': {e}")
+            except Exception as exc:
+                logger.warning(
+                    "[NRPPlugin] Unable to compute '%s': %s",
+                    indicator,
+                    exc,
+                )
 
         return result

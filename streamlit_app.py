@@ -1,132 +1,98 @@
-from datetime import datetime
 import streamlit as st
+from core.pipeline import ParetoExplorerEngine
+from ui.input_panel import render_input_panel
+from ui.enrichment_panel import render_enrichment_panel
+from ui.framing_panel import render_framing_panel, render_framing_summary
+from ui.lens_panel import render_lens_panel, render_lens_feedback
+from ui.workspace_summary import render_summary
+from ui.workspace_control import render_workspace_controls
+from ui.workspace_maps import render_maps
+from ui.css_panel import render_css_panel, render_css_comparison
 
-from css.css_comparison import render_css_comparison
-from css.css_panel import render_css_panel
-from core.enrichment import render_enrichment
-from core.framing import apply_framing
-from core.input_panel import render_input_panel
-from core.workspace import render_workspace
-from core.workspace_controls import render_workspace_controls
-from lenses.lens_engine import apply_lens
-from lenses.lens_feedback import render_lens_feedback
-from lenses.lens_selection import render_group_selector_and_save
-from lenses.lenses import render_lens_panel
-
-# --------------------------------------------------------------------------------------
-# Page Configuration & Global Styling
-# --------------------------------------------------------------------------------------
 st.set_page_config(page_title="Decision Space Explorer", layout="wide")
-
-st.markdown(
-    """
-    <style>
-    [data-testid="stExpander"] details summary p {
-        font-size: 1.2rem;
-        font-weight: 700;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 st.title("Decision Space Explorer")
 
-# --------------------------------------------------------------------------------------
-# 1. Input Panel
-# --------------------------------------------------------------------------------------
-dataset = render_input_panel()
-if dataset is None:
-    st.info("Select a domain configuration to begin.")
-    st.stop()
+if "engine" not in st.session_state:
+    st.session_state.engine = ParetoExplorerEngine()
+
+engine: ParetoExplorerEngine = st.session_state.engine
+
+active_lens_name = "None"
+lens_params = {}
+css_df = None
 
 # --------------------------------------------------------------------------------------
-# 2. Enrichment Step (Domain indicators computation)
+# Sidebar Workflow
 # --------------------------------------------------------------------------------------
-dataset = render_enrichment(dataset)
+with st.sidebar:
+    # Phase 1: Input
+    problem_context = render_input_panel()
+    if problem_context is not None:
+        engine.load_problem(problem_context)
+
+    if engine.has_data and engine.plugin:
+        with st.expander("⚙️ Data Enrichment", expanded=False):
+            selected_indicators = render_enrichment_panel(engine)
+            if st.button("Apply Enrichment", type="primary"):
+                engine.enrich(selected_indicators)
+                st.success("Dataset enriched successfully!")
+                st.rerun()
+
+    if engine.has_data:
+        with st.expander("🎛️ Context Framing", expanded=False):
+            user_bounds = render_framing_panel(engine)
+            engine.apply_framing(user_bounds)
+            render_framing_summary(len(engine.working_df), len(engine.framed_df))
+
+    show_ids = False
+    if engine.has_data:
+        show_ids = render_workspace_controls(engine.framing_dimensions)
+
+    if engine.has_data:
+        active_lens_name, lens_params = render_lens_panel(engine)
+
+    # 2. PANEL CSS EN EL SIDEBAR (Fija el SOI activo como CSS)
+    if engine.has_data:
+        # Construimos el diccionario de contexto del dataset
+        dataset_config = getattr(engine.context, "config", {}) if engine.context else {}
+        dataset_ctx = {
+            "metrics": getattr(engine, "metrics", engine.framing_dimensions),
+            "selected_indicators": getattr(engine, "selected_indicators", []),
+            "config": dataset_config,
+        }
+        
+        # Renderiza controles en sidebar y obtiene el DataFrame fijado/filtrado
+        css_df = render_css_panel(current_df=engine.active_df, dataset=dataset_ctx)
+
 
 # --------------------------------------------------------------------------------------
-# 3. Workspace Controls & Framing
+# Main Workspace View
 # --------------------------------------------------------------------------------------
-dimensions = dataset["metrics"] + dataset["selected_indicators"]
-show_ids = render_workspace_controls(dimensions)
+if engine.has_data:
+    dataset_config = getattr(engine.context, "config", {}) if engine.context else {}
+    dataset_ctx = {
+        "metrics": getattr(engine, "metrics", engine.framing_dimensions),
+        "selected_indicators": getattr(engine, "selected_indicators", []),
+        "config": dataset_config,
+    }
 
-framed_df = apply_framing(dataset)
+    # 1. Summary (Contiene Overview, Table Preview y la pestaña de Saved SOIs)
+    render_summary(engine=engine, dataset_config=dataset_config)
 
-# --------------------------------------------------------------------------------------
-# 4. Working Dataset Construction (Active SOI Filtering)
-# --------------------------------------------------------------------------------------
-working_df = framed_df.copy()
+    # Banner de información de lente activa
+    render_lens_feedback(active_lens_name, engine.active_df)
 
-if "active_soi_ids" in st.session_state:
-    working_df = working_df[
-        working_df["id"].isin(st.session_state.active_soi_ids)
-    ].copy()
-
-# Reset lens if requested by state
-if st.session_state.get("pending_lens_reset", False):
-    st.session_state["active_lens"] = "None"
-    st.session_state["pending_lens_reset"] = False
-
-# --------------------------------------------------------------------------------------
-# 5. Lenses Processing & Engine
-# --------------------------------------------------------------------------------------
-(
-    active_lens,
-    lens_params,
-    feedback_placeholder,
-    selection_placeholder,
-) = render_lens_panel(dataset, working_df)
-
-lens_df = apply_lens(working_df, active_lens, lens_params, dataset)
-
-if lens_df is None:
-    st.sidebar.warning(
-        "The selected lens returned no dataset. Reverting to the current working dataset."
+    # 2. Decision Maps Section
+    render_maps(
+        df=engine.active_df,
+        dimensions=engine.framing_dimensions,
+        show_ids=show_ids,
     )
-    lens_df = working_df.copy()
 
-# Render Feedback & Group Selector
-render_lens_feedback(feedback_placeholder, active_lens, lens_df)
+    # 3. DETAILED CSS COMPARISON SECTION
+    # Se renderiza sólo si el checkbox "Open detailed comparison" está activo en el sidebar
+    if css_df is not None:
+        render_css_comparison(css_df=css_df, dataset=dataset_ctx)
 
-current_df = render_group_selector_and_save(
-    selection_placeholder, active_lens, lens_df, lens_params
-)
-
-if current_df is None:
-    current_df = lens_df.copy()
-
-# --------------------------------------------------------------------------------------
-# 6. Save State of Interest (SOI)
-# --------------------------------------------------------------------------------------
-if "pending_save_soi" in st.session_state:
-    if "saved_sois" not in st.session_state:
-        st.session_state.saved_sois = []
-
-    pending = st.session_state.pending_save_soi
-    existing_names = [soi["name"] for soi in st.session_state.saved_sois]
-
-    if pending["name"] in existing_names:
-        st.sidebar.warning("A SOI with this name already exists.")
-    else:
-        st.session_state.saved_sois.append(
-            {
-                "name": pending["name"],
-                "lens": pending["lens"],
-                "params": pending.get("params", {}),
-                "ids": pending.get("ids", current_df["id"].tolist()),
-                "group": pending.get("group", "All groups"),
-                "group_column": pending.get("group_column"),
-            }
-        )
-        st.sidebar.success(f"Saved SOI: {pending['name']}")
-    del st.session_state["pending_save_soi"]
-
-# --------------------------------------------------------------------------------------
-# 7. Candidate Solution Set (CSS) & Workspace Rendering
-# --------------------------------------------------------------------------------------
-css_df = render_css_panel(current_df, dataset)
-
-render_workspace(css_df, dataset, show_ids)
-
-render_css_comparison(css_df, dataset)
+else:
+    st.info("Select a dataset in the sidebar to begin.")

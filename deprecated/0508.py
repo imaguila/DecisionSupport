@@ -7051,7 +7051,7 @@ def render_soi_tab():
 import streamlit as st
 from datetime import datetime
 
-from core.input_panel import render_input_panel
+from deprecated.input_panel import render_input_panel
 from core.enrichment import render_enrichment
 from core.framing import apply_framing
 from core.workspace_controls import render_workspace_controls
