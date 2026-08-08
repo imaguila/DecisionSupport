@@ -114,19 +114,19 @@ def render_css_panel(
             help="Open detailed visual comparison section for the current CSS.",
         )
 
-    css_df = apply_css_filtering(
-        df=current_df,
-        enabled=st.session_state.css_enabled,
-        source=st.session_state.css_source,
-        manual_ids=st.session_state.css_manual_ids,
-        highlight_ids=st.session_state.css_highlight_ids,
-    )
+        # 1. Obtenemos el DataFrame filtrado aquí dentro
+        css_df = apply_css_filtering(
+            df=current_df,
+            enabled=st.session_state.css_enabled,
+            source=st.session_state.css_source,
+            manual_ids=st.session_state.css_manual_ids,
+            highlight_ids=st.session_state.css_highlight_ids,
+        )
 
-    if st.session_state.css_enabled:
-        st.sidebar.info(f"CSS size: {len(css_df)} solutions")
+        # 2. Usamos st.info() en lugar de st.sidebar.info() para que respete el expander
+        st.info(f"CSS size: {len(css_df)} solutions")
 
     return css_df
-
 
 # =====================================================
 # RENDER WIDGETS
